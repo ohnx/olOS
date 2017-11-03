@@ -2,35 +2,89 @@
 ; Should be placed on the first 512b of a MBR disk.
 ; Loads and jumps to the first file on a FAT32 disk.
 
-; we are loaded by BIOS at 0x7C00
+; we are loaded by BIOS at 0x7C00; set org = 0x7C00
+; alternative method: set segment to 0x7C00
 [org 0x7C00]
 ; 16-bit real mode
 [bits 16]
 
 start: jmp s1_start
+nop
 
-; filesystem table info
-bpbBytesPerSector:          DW 512
-bpbSectorsPerCluster:       DB 1
-bpbReservedSectors:         DW 1
-bpbNumberOfFATs:            DB 2
-bpbRootEntries:             DW 224
-bpbTotalSectors:            DW 2880
-bpbMedia:                   DB 0xF0
-bpbSectorsPerFAT:           DW 9
-bpbSectorsPerTrack:         DW 18
-bpbHeadsPerCylinder:        DW 2
-bpbHiddenSectors:           DD 0
-bpbTotalSectorsBig:         DD 0
-bsDriveNumber:              DB 0
-bsUnused:                   DB 0
-bsExtBootSignature:         DB 0x29
-bsSerialNumber:             DD 0xa0a1a2a3
-bsVolumeLabel:              DB "OHNX LIL OS"
-bsFileSystem:               DB "FAT16   "
+; -----------------------------------------------
+;; filesystem table info for fat16, fat32
+; -----------------------------------------------
+; see http://www.dewassoc.com/kbase/hard_drives/boot_sector.htm
+; for more info
+; sbs = fat16; fbs = fat32
+sbs_OEM_Id:
+fbs_OEM_Id:                 db "OHNX LOS"
+sbs_BytesPerSector:
+fbs_BytesPerSector:         dw 512
+sbs_SectorsPerCluster:
+fbs_SectorsPerCluster:      db 1
+sbs_ReservedSectors:
+fbs_ReservedSectors:        dw 1
+sbs_NumberOfFATs:
+fbs_NumberOfFATs:           db 2
+sbs_RootEntries:
+fbs_RootEntries:            dw 224
+sbs_NumberOfSectors:
+fbs_NumberOfSectors:        dw 2880
+sbs_MediaDescriptor:
+fbs_MediaDescriptor:        db 0xF0
+sbs_SectorsPerFAT:
+fbs_SectorsPerFAT:          dw 9
+sbs_SectorsPerHead:
+fbs_SectorsPerHead:         dw 18
+sbs_HeadsPerCylinder:
+fbs_HeadsPerCylinder:       dw 2
+sbs_HiddenSectors:
+fbs_HiddenSectors:          dd 0
+sbs_BigNumberOfSectors:
+fbs_BigNumberOfSectors:     dd 0
+; this is where FAT16 and FAT32 begin to differ
+; BigSectorsPerFAT is a dd = 8 bytes
+fbs_BigSectorsPerFAT:
+sbs_DriveNumber:            db 0
+sbs_Unused:                 db 0
+sbs_ExtBootSignature:       db 0
+; sbs_SerialNumber is a dd = 8 bytes, but 3 into 8 bytes
+sbs_SerialNumber:
+times 5 db 0
+; fbs_ExtFlags is a dw = 4 bytes, but 5 into 8 bytes
+fbs_ExtFlags:
+times 3 db 0
+; sbs_VolumeLabel is 11 bytes, but 3 into 4 bytes
+sbs_VolumeLabel:            db 0
+; fbs_FSVersion is a dw = 4 bytes, 1 byte into 10 bytes
+fbs_FSVersion:              dw 0
+; fbs_RootDirectoryStart is a dd = 8 bytes, but 5 bytes into 10 bytes
+fbs_RootDirectoryStart:
+times 5 db 0
+; sbs_FileSystem is 8 bytes, but 5 into 8 bytes
+sbs_FileSystem:
+times 3 db 0
+; fbs_FSInfoSector is a dw = 4 bytes, 3 bytes into 8 bytes
+fbs_FSInfoSector:           dw 1
+; fbs_BackupBootSector is a dw = 4 bytes, but 7 bytes into 8 bytes
+; luckily, at this point, fat16 is done and we don't care anymore.
+fbs_BackupBootSector:       dw 6
+; reserved area
+times 13 db 0
+fbs_DriveNumber:            db 0
+fbs_ExtBootSignature:       db 0x29
+fbs_VolumeID:               dd 0xDEADBEEF
+fbs_VolumeLabel:            db "OHNX LIL OS"
+fbs_FileSystemType:         db "FAT32   "
 
+; -----------------------------------------------
+;; Code
+; -----------------------------------------------
 s1_start:
     ; set up memory segments
+    ; since we use org=0x7C00 the segment is 0.
+    ; i.e. memory accesses are 0x0000:0x7C00+something
     xor ax, ax
     mov ds, ax
     mov es, ax
@@ -135,12 +189,12 @@ s1_err db "s1 fatal boot error", 10, 13, 0
 ; -----------------------------------------------
 s1_eof:
 ; ensure file is not too big
-%if ($ - $$) > 446
+%if ($ - $$) > 510
     %fatal "s1 bootloader too big!"
 %endif
 
 ; fill with zeroes
 times 510 - ($ - $$) db 0
 
-; the partition table goes here
+; magic bytes
 dw 0xAA55
