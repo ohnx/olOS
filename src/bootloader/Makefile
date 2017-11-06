@@ -10,7 +10,7 @@ $(DISKNAME):
 	nasm -f bin $< -o $@
 
 .PHONY: stage1
-stage1: s1.bin $(DISKNAME)
+stage1: s1_vbr.bin $(DISKNAME)
 	dd if=$< of=$(DISKNAME) bs=1 count=2 iflag=count_bytes conv=notrunc,noerror
 	dd if=$< of=$(DISKNAME) bs=1 skip=90 seek=90 count=422 iflag=skip_bytes,count_bytes oflag=seek_bytes conv=notrunc,noerror
 
@@ -21,7 +21,7 @@ bootloader: stage1
 
 .PHONY: clean
 clean:
-	rm -rf s1.bin s2.bin
+	rm -rf s1_vbr.bin s2.bin
 
 run: bootloader
 	qemu-system-x86_64 -drive format=raw,file=$(DISKNAME)

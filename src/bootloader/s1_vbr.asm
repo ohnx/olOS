@@ -1,8 +1,8 @@
-; s1.asm - Stage 1 bootloader of olOS
-; Should be placed on the first 512b of a MBR disk.
-; Loads and jumps to the first file on a FAT32 disk.
+; s1_vbr.asm - Stage 1 bootloader of olOS
+; Should be placed on the first sector on a partition.
+; Loads and jumps to the first file on a FAT32 partition.
 
-; we are loaded by BIOS at 0x7C00; set org = 0x7C00
+; we are loaded by BIOS or by s1_mbr at 0x7C00; set org = 0x7C00
 ; alternative method: set segment to 0x7C00
 [org 0x7C00]
 ; 16-bit real mode
@@ -12,7 +12,7 @@ start: jmp s1_start
 nop
 
 ; -----------------------------------------------
-;; filesystem table info for fat16, fat32
+;; filesystem table info for fat16, fat32 (this table is not written to disk)
 ; -----------------------------------------------
 ; see http://www.dewassoc.com/kbase/hard_drives/boot_sector.htm
 ; for more info
@@ -185,12 +185,12 @@ s1_hello db "s1 init!", 10, 13, 0
 s1_err db "s1 fatal boot error", 10, 13, 0
 
 ; -----------------------------------------------
-;; EOF
+;; End of code + data, pad
 ; -----------------------------------------------
-s1_eof:
+s1_pad:
 ; ensure file is not too big
 %if ($ - $$) > 510
-    %fatal "s1 bootloader too big!"
+    %fatal "s1 vbr bootloader too big!"
 %endif
 
 ; fill with zeroes
@@ -198,3 +198,7 @@ times 510 - ($ - $$) db 0
 
 ; magic bytes
 dw 0xAA55
+
+; -----------------------------------------------
+;; EOF
+; -----------------------------------------------
