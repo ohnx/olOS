@@ -1,15 +1,21 @@
-; s1_vbr.asm - Stage 1 bootloader of olOS
-; Should be placed on the first sector on a partition.
-; Loads and jumps to the first file on a FAT32 partition.
+; s1_vbr.asm - Stage 1 bootloader of olOS (VBR)
 
-; we are loaded by BIOS or by s1_mbr at 0x7C00; set org = 0x7C00
-; alternative method: set segment to 0x7C00
-[org 0x7C00]
+; we are loaded by BIOS at 0x7C00, but we 
+; copy ourselves to 0x7A00.
+[org 0x7A00]
 ; 16-bit real mode
 [bits 16]
 
-start: jmp s1_start
+start: jmp s1_startfake
 nop
+
+; -----------------------------------------------
+;; Info
+; -----------------------------------------------
+; Should be placed on the first sector of a
+; FAT32 partition. When booted from, it will load
+; and jump to a specifically named file on the
+; partition.
 
 ; -----------------------------------------------
 ;; filesystem table info for fat16, fat32 (this table is not written to disk)
@@ -17,58 +23,24 @@ nop
 ; see http://www.dewassoc.com/kbase/hard_drives/boot_sector.htm
 ; for more info
 ; sbs = fat16; fbs = fat32
-sbs_OEM_Id:
 fbs_OEM_Id:                 db "OHNX LOS"
-sbs_BytesPerSector:
 fbs_BytesPerSector:         dw 512
-sbs_SectorsPerCluster:
 fbs_SectorsPerCluster:      db 1
-sbs_ReservedSectors:
 fbs_ReservedSectors:        dw 1
-sbs_NumberOfFATs:
 fbs_NumberOfFATs:           db 2
-sbs_RootEntries:
 fbs_RootEntries:            dw 224
-sbs_NumberOfSectors:
 fbs_NumberOfSectors:        dw 2880
-sbs_MediaDescriptor:
 fbs_MediaDescriptor:        db 0xF0
-sbs_SectorsPerFAT:
 fbs_SectorsPerFAT:          dw 9
-sbs_SectorsPerHead:
 fbs_SectorsPerHead:         dw 18
-sbs_HeadsPerCylinder:
 fbs_HeadsPerCylinder:       dw 2
-sbs_HiddenSectors:
 fbs_HiddenSectors:          dd 0
-sbs_BigNumberOfSectors:
 fbs_BigNumberOfSectors:     dd 0
-; this is where FAT16 and FAT32 begin to differ
-; BigSectorsPerFAT is a dd = 8 bytes
-fbs_BigSectorsPerFAT:
-sbs_DriveNumber:            db 0
-sbs_Unused:                 db 0
-sbs_ExtBootSignature:       db 0
-; sbs_SerialNumber is a dd = 8 bytes, but 3 into 8 bytes
-sbs_SerialNumber:
-times 5 db 0
-; fbs_ExtFlags is a dw = 4 bytes, but 5 into 8 bytes
-fbs_ExtFlags:
-times 3 db 0
-; sbs_VolumeLabel is 11 bytes, but 3 into 4 bytes
-sbs_VolumeLabel:            db 0
-; fbs_FSVersion is a dw = 4 bytes, 1 byte into 10 bytes
+fbs_BigSectorsPerFAT:       dd 0
+fbs_ExtFlags:               dw 0
 fbs_FSVersion:              dw 0
-; fbs_RootDirectoryStart is a dd = 8 bytes, but 5 bytes into 10 bytes
-fbs_RootDirectoryStart:
-times 5 db 0
-; sbs_FileSystem is 8 bytes, but 5 into 8 bytes
-sbs_FileSystem:
-times 3 db 0
-; fbs_FSInfoSector is a dw = 4 bytes, 3 bytes into 8 bytes
+fbs_RootDirectoryStart:     dd 0
 fbs_FSInfoSector:           dw 1
-; fbs_BackupBootSector is a dw = 4 bytes, but 7 bytes into 8 bytes
-; luckily, at this point, fat16 is done and we don't care anymore.
 fbs_BackupBootSector:       dw 6
 ; reserved area
 times 13 db 0
@@ -81,22 +53,53 @@ fbs_FileSystemType:         db "FAT32   "
 ; -----------------------------------------------
 ;; Code
 ; -----------------------------------------------
-s1_start:
-    ; set up memory segments
-    ; since we use org=0x7C00 the segment is 0.
-    ; i.e. memory accesses are 0x0000:0x7C00+something
+s1_startfake:
+    ; clear interrupts
+    cli
+    ; segments can be difficult to understand and
+    ; with our use case they are unnecessary. so,
+    ; set them to 0 and don't worry about a thing
     xor ax, ax
-    mov ds, ax
-    mov es, ax
+    ; stack segment
     mov ss, ax
+    ; stack pointer
+    mov sp, 0x7A00
+    ; data segment
+    mov ds, ax
+    ; extra segment
+    mov es, ax
+    ; extra segment #2 (general-purpose)
+    mov fs, ax
 
-    ; set up the stack to grow down from 0x7C00
-    mov sp, 0x7C00
+    ; keep a copy of dl in 0x500
+    mov [fs:0x500], dl
+
+; copy ourselves from 0x7C00 to 0x7A00 so that we
+; can load other sectors to 0x7C00
+s1_memcpy:
+    ; source is si = 0x7C00
+    mov si, 0x7C00
+    ; destination is di = 0x7A00
+    mov di, 0x7A00
+    ; es and ds are already set to 0
+    ; we are moving 512 bytes
+    mov cx, 512
+    ; we are moving upwards so direction flag = 0
+    cld
+    ; copy the bytes!
+    rep movsb
+    ; now, we can jump to the real start!
+    jmp 0:s1_start
+
+
+; real start!
+s1_start:
+    ; re-enable interrupts
+    sti
 
     ; enable video mode
     call s1_enablevideo
 
-    ; reset disks
     ; error message string and length
     mov si, s1_hello
 
@@ -106,58 +109,6 @@ s1_start:
     ; halt cpu (should not reach here)
     cli
     hlt
-
-; enable video mode
-; clobbers ah and al
-s1_enablevideo:
-    ; ah=0x0 set video mode
-    mov ah, 0x0
-    ; Text Mode 80x25 chars, 16 colors
-    mov al, 0x3
-
-    ; interrupt BIOS video services
-    int 0x10
-    ret
-
-; output a null-terminated string to screen
-; expects string offset location in si
-; clobbers ah, al, and si
-s1_print:
-    ; load character from (ds:si) to al
-    lodsb
-
-    ; check if al = null (end of string)
-    or al, al
-    jz s1_print_done
-
-    ; ah=0xe teletype output
-    mov ah, 0xe
-
-    ; interrupt BIOS video services
-    int 0x10
-
-    ; loop
-    jmp s1_print
-
-s1_print_done:
-    ; done
-    ret
-
-; function to reset disks.
-; assumes dl is set to the disk the os was loaded from
-; clobbers ah
-s1_resetdisks:
-    ; ah = 0 reset disk location
-    mov ah, 0x0
-
-    ; interrupt BIOS disk services
-    int 0x13
-
-    ; failed to reset disk
-    jmp s1_resetdisks
-
-    ; no error
-    ret
 
 ; Handle an error :(
 s1_bootfail:
@@ -176,6 +127,94 @@ s1_bootfail:
     ; halt cpu. good night.
     cli
     hlt
+
+
+; -----------------------------------------------
+;; Utility functions common across MBR and VBR
+; -----------------------------------------------
+; enable video mode
+s1_enablevideo:
+    ; store value of a
+    push ax
+    ; ah=0x0 set video mode
+    mov ah, 0x0
+    ; Text Mode 80x25 chars, 16 colors
+    mov al, 0x3
+
+    ; interrupt BIOS video services
+    int 0x10
+
+    ; restore value of a
+    pop ax
+    ret
+
+; output a null-terminated string to screen
+; expects string offset location in si
+; clobbers ah, al, and si
+s1_print:
+    ; store values
+    push ax
+    push si
+s1_print_loop:
+    ; load character from (ds:si) to al
+    lodsb
+
+    ; check if al = null (end of string)
+    or al, al
+    jz s1_print_done
+
+    ; ah=0xe teletype output
+    mov ah, 0xe
+
+    ; interrupt BIOS video services
+    int 0x10
+
+    ; loop
+    jmp s1_print_loop
+
+s1_print_done:
+    ; done, restore values and return
+    pop si
+    pop ax
+    ret
+
+; function to reset disks.
+; assumes dl is set to disk to reset
+s1_resetdisks:
+    push ax
+s1_resetdisks_loop:
+    ; ah = 0 reset disk location
+    mov ah, 0x0
+
+    ; interrupt BIOS disk services
+    int 0x13
+
+    ; failed to reset disk
+    jc s1_resetdisks_loop
+
+    ; no error
+    pop ax
+    ret
+
+; check if disk supports extended reads
+s1_cde:
+    push ax
+    push bx
+    push dx
+
+    ; ah = 0x41 Extensions
+    mov ah, 0x41
+    mov bx, 0x55AA
+    mov dl, 0x80
+
+    ; check results
+    int 0x13
+
+    ; let CF be set if error occurred
+    pop dx
+    pop bx
+    pop ax
+    ret
 
 ; -----------------------------------------------
 ;; Strings

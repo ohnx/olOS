@@ -1,4 +1,10 @@
-; s1_mbr.asm - Stage 1 bootloader of olOS
+; s1_mbr.asm - Stage 1 bootloader of olOS (MBR)
+
+; we are loaded by BIOS at 0x7C00, but we 
+; copy ourselves to 0x7A00.
+[org 0x7A00]
+; 16-bit real mode
+[bits 16]
 
 ; -----------------------------------------------
 ;; Info
@@ -14,12 +20,6 @@
 ; -----------------------------------------------
 ;; Code
 ; -----------------------------------------------
-; we are loaded by BIOS at 0x7C00, but we 
-; copy ourselves to 0x7A00.
-[org 0x7A00]
-; 16-bit real mode
-[bits 16]
-
 s1_startfake:
     ; clear interrupts
     cli
@@ -35,11 +35,9 @@ s1_startfake:
     mov ds, ax
     ; extra segment
     mov es, ax
-    ; extra segment #2 (general-purpose)
-    mov fs, ax
 
     ; keep a copy of dl in 0x500
-    mov [fs:0x500], dl
+    mov [ds:0x500], dl
 
 ; copy ourselves from 0x7C00 to 0x7A00 so that we
 ; can load other sectors to 0x7C00
@@ -72,15 +70,11 @@ s1_start:
     xor ax, ax
 
 s1_checkpart:
-    ; set data and extra segments
-    mov ds, ax
-    mov es, ax
+    ; extra segment gs
+    mov gs, ax
 
-    ; store raw address of this partition's flag
-    ; in si
-    mov si, p1_bi
-    ; now store the value of flag in dh
-    mov dh, [ds:p1_bi]
+    ; store the value of flag in dh
+    mov dh, [gs:p1_bi]
     ; check if the active indicator flag is set
     cmp dh, 0x80
 
@@ -112,11 +106,6 @@ s1_checkpart_next:
     ; last parition, fall through to error :(
 
 s1_disp_nopart:
-    ; clear memory segments
-    xor ax, ax
-    mov ds, ax
-    mov es, ax
-
     ; display error message
     mov si, s1_nopart
     call s1_print
@@ -125,11 +114,6 @@ s1_disp_nopart:
     jmp s1_goodbye
 
 s1_diskread_err:
-    ; clear memory segments
-    xor ax, ax
-    mov ds, ax
-    mov es, ax
-
     ; display error message
     mov si, sl_readd
     call s1_print
@@ -151,35 +135,31 @@ s1_bootpart:
     ; read 512 bytes (1 sector) from disk
     ; we will form the packet at address 0x600
     ; packet size = 16 bytes
-    mov byte [fs:0x600], 0x10
+    mov byte [ds:0x600], 0x10
     ; reserved
-    mov byte [fs:0x601], 0x00
+    mov byte [ds:0x601], 0x00
     ; number of blocks to transfer
-    mov word [fs:0x602], 0x01
+    mov word [ds:0x602], 0x01
     ; address of transfer buffer (offset)
-    mov word [fs:0x604], 0x7C00 
+    mov word [ds:0x604], 0x7C00 
     ; address of transfer buffer (segment)
-    mov word [fs:0x606], 0x00
+    mov word [ds:0x606], 0x00
     ; lower 32-bits of 48-bit starting LBA
-    mov ax, [ds:p1_sseclbal]
-    mov word [fs:0x608], ax
-    mov ax, [ds:p1_sseclbah]
-    mov word [fs:0x610], ax
+    mov ax, [gs:p1_sseclbal]
+    mov word [ds:0x608], ax
+    mov ax, [gs:p1_sseclbah]
+    mov word [ds:0x610], ax
     ; high 32-bits of 48-bit starting LBA
-    mov dword [fs:0x60c], 0x00
+    mov dword [ds:0x60c], 0x00
 
     ; set ds:si to disk address packet in memory
-    ; back up ds
-    push ds
-    ; ds = fs
-    mov ax, fs
-    mov ds, ax
+    ; ds is already 0x0
     ; we formed the packet at 0x600
     mov si, 0x600
     ; set ah = 0x42 extended read
     mov ah, 0x42
     ; set drive number
-    mov dl, [fs:0x500]
+    mov dl, [ds:0x500]
 
     ; read the bytes
     int 0x13
@@ -187,24 +167,18 @@ s1_bootpart:
     ; check if it read successfully
     jc s1_diskread_err
 
-    ; restore ds
-    pop ds
-
     ; check if there is a boot disk signature
-    ; 0x55
-    mov ax, [fs:0x7dfe]
-    cmp ax, 0x55
-    jne s1_bootpart_mistake
-    ; 0xAA
-    mov ax, [fs:0x7dff]
-    cmp ax, 0xAA
+    ; 0xAA55 = 0x55 0xAA
+    mov ax, [ds:0x7dfe]
+    cmp ax, 0xAA55
     jne s1_bootpart_mistake
 
     ; all good! clean up a few things to be nice
     xor ax, ax
-    mov ds, ax
-    mov es, ax
-    mov fs, ax
+    mov gs, ax
+
+    ; restore dl
+    mov dl, [ds:0x500]
 
     ; ... and jump!
     jmp 0:0x7c00
@@ -311,12 +285,12 @@ s1_cde:
     ; check results
     int 0x13
 
-    ; let cf continue to  be set if error
+    ; let CF be set if error occurred
     pop dx
     pop bx
     pop ax
     ret
-    
+
 ; -----------------------------------------------
 ;; Strings
 ; -----------------------------------------------
